@@ -18,7 +18,7 @@ Image readPPM(const char *filename)
     FILE *file = fopen(filename, "rb");
     if (!file)
     {
-        perror("A fajlt nem tudta megnyitni");
+        perror("Could not open file");
         exit(1);
     }
 
@@ -29,7 +29,7 @@ Image readPPM(const char *filename)
     fscanf(file, "%s\n%d %d\n%d\n", format, &img.width, &img.height, &max);
     if (strcmp(format, "P6") != 0 || max != 255)
     {
-        printf("A fajlnak P6 PPM formatumunak kell lennie\n");
+        printf("The file must be in P6 PPM format\n");
         exit(1);
     }
 
@@ -44,7 +44,7 @@ void writePPM(const char *filename, Image img)
     FILE *file = fopen(filename, "wb");
     if (!file)
     {
-        perror("Nem sikerult a fajlba irni");
+        perror("Failed to write to file");
         exit(1);
     }
 
@@ -58,7 +58,7 @@ void plotGPU(const char *csv_filename, const char *met, const char *image, FILE 
     FILE *fp = fopen(csv_filename, "r");
     if (!fp)
     {
-        printf("Nem sikerult megnyitni a fajlt\n");
+        printf("Failed to open the file\n");
         return;
     }
 
@@ -69,7 +69,7 @@ void plotGPU(const char *csv_filename, const char *met, const char *image, FILE 
 
     fgets(line, sizeof(line), fp);
 
-    printf("\nGPU eredmenyek (%s, %s):\n", image, met);
+    printf("\nGPU results (%s, %s):\n", image, met);
 
     while (fgets(line, sizeof(line), fp))
     {
@@ -150,11 +150,11 @@ int main()
     cl_context context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &err);
     if (!context || err != CL_SUCCESS)
     {
-        printf("Context hiba!\n");
+        printf("Context error!\n");
         return 0;
     }
 
-    const char *kernel_code = load_kernel_source("feladat.cl", &error_code);
+    const char *kernel_code = load_kernel_source("kernels/feladat.cl", &error_code);
     if (error_code != 0)
     {
         printf("Source code loading error!\n");
@@ -194,11 +194,21 @@ int main()
         return 0;
     }
 
-    cl_kernel kernel = clCreateKernel(program, "feladat_kernel", &err);
-    if (err != CL_SUCCESS)
+    cl_kernel kernels[5];
+
+    kernels[0] = clCreateKernel(program, "grayscale_kernel", &err);
+    kernels[1] = clCreateKernel(program, "red_kernel", &err);
+    kernels[2] = clCreateKernel(program, "green_kernel", &err);
+    kernels[3] = clCreateKernel(program, "blue_kernel", &err);
+    kernels[4] = clCreateKernel(program, "blur_kernel", &err);
+
+    for (int i = 0; i < 5; i++)
     {
-        printf("Kernel hiba!\n");
-        return 0;
+        if (kernels[i] == NULL || err != CL_SUCCESS)
+        {
+            printf("Kernel creation error at index: %d, err: %d\n", i, err);
+            return 0;
+        }
     }
 
     cl_queue_properties props[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
@@ -219,8 +229,8 @@ int main()
     const char *modeNames[] = {"gray", "red", "green", "blue", "blur"};
     double runtime;
 
-    FILE *f = fopen("meresek.csv", "w");
-    fprintf(f, "Nev;Szelesseg x Magassag;Modszer;FutasIdo (mp)\n");
+    FILE *f = fopen("results.csv", "w");
+    fprintf(f, "Name;Width x Height;Method;ExecutionTime (mp)\n");
 
     for (int img_idx = 0; img_idx < image_count; img_idx++)
     {
@@ -240,15 +250,20 @@ int main()
 
             if (err != CL_SUCCESS)
             {
-                printf("Buffer hiba!\n");
+                printf("Buffer error!\n");
                 continue;
             }
+
+            cl_kernel kernel = kernels[m];
 
             clSetKernelArg(kernel, 0, sizeof(cl_mem), &dImage);
             clSetKernelArg(kernel, 1, sizeof(int), &img.width);
             clSetKernelArg(kernel, 2, sizeof(int), &img.height);
-            clSetKernelArg(kernel, 3, sizeof(int), &m);
-            clSetKernelArg(kernel, 4, sizeof(int), &strength);
+
+            if (m == 4)
+            {
+                clSetKernelArg(kernel, 3, sizeof(int), &strength);
+            }
 
             size_t globalSize[2] = {(size_t)img.width, (size_t)img.height};
 
@@ -273,14 +288,14 @@ int main()
                 NULL,
                 NULL);
 
-            printf("%s: %d x %d, modszer: %s, %.6f\n", inputFile, img.width, img.height, modeNames[m], runtime);
+            printf("%s: %d x %d, method: %s, %.6f\n", inputFile, img.width, img.height, modeNames[m], runtime);
             fprintf(f, "%s;%d x %d;%s;%.6f\n", inputFile, img.width, img.height, modeNames[m], runtime);
 
             char outputFile[100];
             char name[50];
 
             sscanf(inputFile, "%[^.]", name);
-            sprintf(outputFile, "kepek/%s_%s.ppm", name, modeNames[m]);
+            sprintf(outputFile, "images/%s_%s.ppm", name, modeNames[m]);
 
             writePPM(outputFile, img);
 
@@ -292,19 +307,20 @@ int main()
 
     fclose(f);
 
-    FILE *file = fopen("grafikonok.csv", "w");
+    FILE *file = fopen("charts.csv", "w");
 
-    printf("\n Futasi ido grafikon (kep01.ppm):\n");
-    fprintf(file, "\nSpeedup grafikon (kep01.ppm):\n");
-    plotGPU("meresek.csv", NULL, "kep01.ppm", file);
+    printf("\n Execution time (kep01.ppm):\n");
+    fprintf(file, "\nSpeedup chart (kep01.ppm):\n");
+    plotGPU("results.csv", NULL, "kep01.ppm", file);
 
-    printf("\n Filter grafikon:\n");
-    plotGPU("meresek.csv", "blur", NULL, file);
+    printf("\n Filter chart:\n");
+    plotGPU("results.csv", "blur", NULL, file);
 
     fclose(file);
 
     clReleaseCommandQueue(queue);
-    clReleaseKernel(kernel);
+    for (int i = 0; i < 5; i++)
+        clReleaseKernel(kernels[i]);
     clReleaseProgram(program);
     clReleaseContext(context);
 
