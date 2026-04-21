@@ -29,10 +29,10 @@ __kernel void red_kernel(__global unsigned char* data,
     if (x >= width || y >= height)
         return;
 
-    int idx = 3 * (y * width + x);
+        int idx = 3 * (y * width + x);
 
-    data[idx + 1] = 0;
-    data[idx + 2] = 0;
+        data[idx + 1] = 0;
+        data[idx + 2] = 0;
 }
 
 __kernel void green_kernel(__global unsigned char* data,
