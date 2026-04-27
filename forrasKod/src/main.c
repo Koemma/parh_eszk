@@ -24,6 +24,7 @@ void plotGPU(const char *csv_filename, const char *met, const char *image, FILE 
     float time_val;
     double speedup;
     double cpu_time;
+    int pixels;
 
     fgets(line, sizeof(line), fp);
 
@@ -33,8 +34,8 @@ void plotGPU(const char *csv_filename, const char *met, const char *image, FILE 
     {
         line[strcspn(line, "\r\n")] = 0;
 
-        if (sscanf(line, " %[^;];%d x %d;%[^;];%lf;%f;%lf",
-                   filename, &width, &height, method, &cpu_time, &time_val, &speedup) == 7)
+        if (sscanf(line, " %[^;];%d x %d;%d;%[^;];%lf;%f;%lf",
+                   filename, &width, &height, &pixels, method, &cpu_time, &time_val, &speedup) == 8)
         {
             int ok = 0;
 
@@ -180,15 +181,20 @@ int main()
     const char *images[] = {
         "images/kep01.ppm",
         "images/kep02.ppm",
-        "images/kep03.ppm"};
+        "images/kep03.ppm",
+        "images/kep04.ppm",
+        "images/kep05.ppm",
+        "images/kep06.ppm"};
     int image_count = sizeof(images) / sizeof(images[0]);
 
     int strength = 8;
     const char *modeNames[] = {"gray", "red", "green", "blue", "blur"};
-    double runtime;
+    double runtime, runtime_r, runtime_w;
+    clock_t start_r, end_r;
+    clock_t start_w, end_w;
 
     FILE *f = fopen("images/results/results.csv", "w");
-    fprintf(f, "Name;Width x Height;Method;CPU time (s);GPU time (s);Speedup\n");
+    fprintf(f, "Name;Width x Height;Pixels;Method;CPU time (s);GPU time (s);Speedup\n");
 
     for (int img_idx = 0; img_idx < image_count; img_idx++)
     {
@@ -196,7 +202,11 @@ int main()
 
         for (int m = 0; m < 5; m++)
         {
+            start_r = clock();
             Image img = readPPM(inputFile);
+            end_r = clock();
+
+            int pixels = img.width * img.height;
 
             size_t imgSize = 3 * img.width * img.height * sizeof(unsigned char);
 
@@ -276,8 +286,8 @@ int main()
             else
                 speedup = cpu_time / runtime;
 
-            printf("(GPU) %s: %d x %d, method: %s, runtime: %.6f, speedup: %.6f\n", inputFile, img.width, img.height, modeNames[m], runtime, speedup);
-            fprintf(f, "%s;%d x %d;%s;%.6lf;%.6f;%.6lf\n", inputFile, img.width, img.height, modeNames[m], cpu_time, runtime, speedup);
+            printf("\n(GPU) %s: %d x %d, %d pixels, method: %s, runtime: %.6f, speedup: %.6f\n", inputFile, img.width, img.height, pixels, modeNames[m], runtime, speedup);
+            fprintf(f, "%s;%d x %d;%d;%s;%.6lf;%.6f;%.6lf\n", inputFile, img.width, img.height, pixels, modeNames[m], cpu_time, runtime, speedup);
 
             char outputFile[100];
             char name[50];
@@ -291,7 +301,14 @@ int main()
             sscanf(base, "%[^.]", name);
             sprintf(outputFile, "images/results/%s_%s.ppm", name, modeNames[m]);
 
+            start_w = clock();
             writePPM(outputFile, img);
+            end_w = clock();
+
+            runtime_r = (double)(end_r - start_r) / CLOCKS_PER_SEC;
+            runtime_w = (double)(end_w - start_w) / CLOCKS_PER_SEC;
+
+            printf("readPPM: %.6f, writePPM: %.6f\n", runtime_r, runtime_w);
 
             clReleaseMemObject(dImage);
             clReleaseEvent(event);
